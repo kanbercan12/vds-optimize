@@ -7,319 +7,355 @@ LOG_FILE="/var/log/vds_optimize.log"
 REPO_RAW="https://raw.githubusercontent.com/kanbercan12/vds-optimize/main/optimize"
 INSTALL_PATH="/usr/local/bin/optimize"
 TUI_PATH="/usr/local/lib/optimize_tui.py"
-VERSION="3.1.0"
+VERSION="3.2.0"
 
 log(){ echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
 
 _install_tui(){
 cat > "$TUI_PATH" << 'PYEOF'
 #!/usr/bin/env python3
-# VDS Optimize TUI - by kanbercan12
 import curses, subprocess, threading, time, os, re
 from datetime import datetime
 
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 LOG_FILE = "/var/log/vds_optimize.log"
 
 MENU = [
-    ("1", "Optimize çalıştır"),
-    ("2", "Durum göster"),
+    ("1", "Optimize calistir"),
+    ("2", "Durum"),
     ("3", "Son loglar"),
-    ("4", "Canlı log"),
+    ("4", "Canli log"),
     None,
     ("5", "Cron kur"),
     ("6", "Cron durumu"),
     None,
     ("7", "Upgrade"),
     None,
-    ("q", "Çıkış"),
+    ("q", "Cikis"),
 ]
 
-def run(cmd):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    return r.stdout.strip()
+def sh(cmd):
+    try:
+        return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, text=True).strip()
+    except:
+        return ""
 
 def get_stats():
-    disk = run("df / | awk 'NR==2{print $5,$3,$4}'").split()
-    disk_pct = int(disk[0].rstrip('%')) if disk else 0
-    disk_used = disk[1] if len(disk) > 1 else "?"
-    disk_free = disk[2] if len(disk) > 2 else "?"
-    mem = run("free -h | awk '/Mem/{print $3,$2}'").split()
-    ram_used = mem[0] if mem else "?"
-    ram_total = mem[1] if len(mem) > 1 else "?"
-    mem_kb = run("free | awk '/Mem/{print $2,$3}'").split()
-    ram_pct = int(int(mem_kb[1])*100//int(mem_kb[0])) if len(mem_kb)==2 and int(mem_kb[0])>0 else 0
-    swap_kb = run("free | awk '/Swap/{print $2,$3}'").split()
-    swap_pct = int(int(swap_kb[1])*100//int(swap_kb[0])) if len(swap_kb)==2 and int(swap_kb[0])>0 else 0
-    swap_used = run("free -h | awk '/Swap/{print $3}'")
-    swap_total = run("free -h | awk '/Swap/{print $2}'")
-    load = run("uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ','")
-    uptime_s = run("uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}'")
-    return {
-        "disk_pct": disk_pct, "disk_used": disk_used, "disk_free": disk_free,
-        "ram_pct": ram_pct, "ram_used": ram_used, "ram_total": ram_total,
-        "swap_pct": swap_pct, "swap_used": swap_used, "swap_total": swap_total,
-        "load": load, "uptime": uptime_s,
-    }
+    d = sh("df / | awk 'NR==2{print $5,$3,$4,$2}'").split()
+    disk_pct  = int(d[0].rstrip('%')) if d else 0
+    disk_used = sh("df -h / | awk 'NR==2{print $3}'")
+    disk_free = sh("df -h / | awk 'NR==2{print $4}'")
+    disk_tot  = sh("df -h / | awk 'NR==2{print $2}'")
+    r = sh("free | awk '/Mem/{print $2,$3,$7}'").split()
+    ram_total_kb = int(r[0]) if r else 1
+    ram_used_kb  = int(r[1]) if len(r)>1 else 0
+    ram_pct = ram_used_kb * 100 // ram_total_kb
+    ram_used = sh("free -h | awk '/Mem/{print $3}'")
+    ram_tot  = sh("free -h | awk '/Mem/{print $2}'")
+    s = sh("free | awk '/Swap/{print $2,$3}'").split()
+    swap_total_kb = int(s[0]) if s else 0
+    swap_used_kb  = int(s[1]) if len(s)>1 else 0
+    swap_pct = (swap_used_kb * 100 // swap_total_kb) if swap_total_kb > 0 else 0
+    swap_used = sh("free -h | awk '/Swap/{print $3}'")
+    swap_tot  = sh("free -h | awk '/Swap/{print $2}'")
+    load = sh("uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ','")
+    uptime_s = sh("uptime -p 2>/dev/null | sed 's/up //'")
+    if not uptime_s:
+        uptime_s = sh("uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}'")
+    return dict(
+        disk_pct=disk_pct, disk_used=disk_used, disk_free=disk_free, disk_tot=disk_tot,
+        ram_pct=ram_pct, ram_used=ram_used, ram_tot=ram_tot,
+        swap_pct=swap_pct, swap_used=swap_used, swap_tot=swap_tot,
+        load=load, uptime=uptime_s
+    )
 
-def pct_bar(pct, w=10):
-    filled = int(pct * w // 100)
-    return "█" * filled + "░" * (w - filled)
+def bar(pct, w=12):
+    f = max(0, min(w, int(pct * w // 100)))
+    return "█" * f + "░" * (w - f)
 
 def strip_ansi(s):
     return re.sub(r'\x1b\[[0-9;]*m', '', s)
 
-class OptimizeTUI:
+class TUI:
+    MENU_W = 22
+
     def __init__(self, scr):
         self.scr = scr
         self.sel = 0
         self.selectable = [i for i, m in enumerate(MENU) if m]
-        self.output_lines = []
-        self.output_lock = threading.Lock()
-        self.running_cmd = False
-        self.live_log = False
+        self.lines = []
+        self.lock = threading.Lock()
+        self.busy = False
+        self.watching_log = False
         self.stats = {}
-        self.stats_lock = threading.Lock()
+        self.slk = threading.Lock()
         self._init_colors()
-        self._load_stats()
+        self._refresh_stats()
 
     def _init_colors(self):
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_CYAN,  -1)
-        curses.init_pair(2, curses.COLOR_GREEN, -1)
-        curses.init_pair(3, curses.COLOR_RED,   -1)
-        curses.init_pair(4, curses.COLOR_YELLOW,-1)
-        curses.init_pair(5, curses.COLOR_WHITE, -1)
-        curses.init_pair(6, 8,                  -1)
-        curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_CYAN)
-        curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_GREEN)
+        curses.init_pair(1,  curses.COLOR_BLACK,  curses.COLOR_CYAN)    # header bar
+        curses.init_pair(2,  curses.COLOR_BLACK,  curses.COLOR_GREEN)   # ok / selected
+        curses.init_pair(3,  curses.COLOR_BLACK,  curses.COLOR_RED)     # err / sel-q
+        curses.init_pair(4,  curses.COLOR_YELLOW, -1)                   # warn text
+        curses.init_pair(5,  curses.COLOR_WHITE,  -1)                   # normal
+        curses.init_pair(6,  8,                   -1)                   # dim
+        curses.init_pair(7,  curses.COLOR_CYAN,   -1)                   # cyan text
+        curses.init_pair(8,  curses.COLOR_GREEN,  -1)                   # green text
+        curses.init_pair(9,  curses.COLOR_RED,    -1)                   # red text
+        curses.init_pair(10, curses.COLOR_BLACK,  curses.COLOR_YELLOW)  # warn selected
 
-    def _load_stats(self):
+    def _refresh_stats(self):
         def _do():
             s = get_stats()
-            with self.stats_lock:
+            with self.slk:
                 self.stats = s
         threading.Thread(target=_do, daemon=True).start()
+
+    def _pct_color(self, pct):
+        if pct >= 90: return curses.color_pair(9)
+        if pct >= 70: return curses.color_pair(4)
+        return curses.color_pair(8)
 
     def draw(self):
         self.scr.erase()
         h, w = self.scr.getmaxyx()
-        menu_w = 24
-        cx = menu_w + 1
+        mw = self.MENU_W
+        cx = mw + 1
+        cw = max(0, w - cx - 1)
 
-        with self.stats_lock:
+        with self.slk:
             st = dict(self.stats)
 
-        # header
+        # ── ROW 0: header bar ─────────────────────────────────────────
+        ts = datetime.now().strftime("%d.%m.%Y  %H:%M:%S")
         title = " VDS OPTİMİZASYON  ·  sunucu yönetimi"
-        ts = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-        hdr = title + " " * max(0, w - len(title) - len(ts) - 1) + ts
+        hdr = title + " " * max(0, w - len(title) - len(ts) - 1) + ts + " "
         try:
             self.scr.attron(curses.color_pair(1) | curses.A_BOLD)
             self.scr.addstr(0, 0, hdr[:w])
             self.scr.attroff(curses.color_pair(1) | curses.A_BOLD)
-        except curses.error:
-            pass
+        except curses.error: pass
 
-        # stat bar
+        # ── ROW 1: status summary ──────────────────────────────────────
         if st:
             dp = st.get("disk_pct", 0)
             rp = st.get("ram_pct", 0)
             sp = st.get("swap_pct", 0)
             lo = st.get("load", "?")
-            dc = curses.color_pair(3 if dp >= 90 else 4 if dp >= 70 else 2)
-            rc = curses.color_pair(3 if rp >= 90 else 4 if rp >= 70 else 2)
-            sc = curses.color_pair(3 if sp >= 70 else 2)
-            parts = [
-                (" Disk ", None), (pct_bar(dp, 8), dc), (f" {dp}%  ", curses.color_pair(5)),
-                ("RAM ", None),  (pct_bar(rp, 8), rc), (f" {rp}%  ", curses.color_pair(5)),
-                ("Swap ", None), ((pct_bar(sp,6)+f" {sp}%") if sp>0 else "bos", sc if sp>0 else curses.color_pair(6)),
+            du = st.get("disk_used", "?")
+            dt = st.get("disk_tot", "?")
+            ru = st.get("ram_used", "?")
+            rt = st.get("ram_tot", "?")
+            up = st.get("uptime", "?")
+
+            status_parts = [
+                (" Disk ", curses.color_pair(6)),
+                (bar(dp, 10), self._pct_color(dp)),
+                (f" {du}/{dt}  ", curses.color_pair(5)),
+                ("RAM ", curses.color_pair(6)),
+                (bar(rp, 10), self._pct_color(rp)),
+                (f" {ru}/{rt}  ", curses.color_pair(5)),
+                ("Swap ", curses.color_pair(6)),
+                (("bos" if sp == 0 else f"{sp}%"), self._pct_color(sp) if sp > 0 else curses.color_pair(6)),
                 (f"  Yuk {lo}", curses.color_pair(5)),
             ]
             x = 0
-            for text, attr in parts:
-                if x >= w: break
-                chunk = text[:w - x]
+            for txt, attr in status_parts:
+                if x >= w - 1: break
+                chunk = txt[:w - x - 1]
                 try:
-                    if attr: self.scr.attron(attr)
+                    self.scr.attron(attr)
                     self.scr.addstr(1, x, chunk)
-                    if attr: self.scr.attroff(attr)
+                    self.scr.attroff(attr)
                     x += len(chunk)
-                except curses.error:
-                    pass
+                except curses.error: pass
 
-        # divider
+        # ── ROW 2: separator + labels ──────────────────────────────────
         try:
             self.scr.attron(curses.color_pair(6))
-            self.scr.addstr(2, 0, "─"*menu_w + "┬" + "─"*max(0,w-menu_w-1))
+            sep = "─" * mw + "┬" + "─" * max(0, w - mw - 1)
+            self.scr.addstr(2, 0, sep[:w])
             self.scr.attroff(curses.color_pair(6))
-        except curses.error:
-            pass
+        except curses.error: pass
 
-        # labels
         try:
-            self.scr.attron(curses.color_pair(5)|curses.A_BOLD)
-            self.scr.addstr(3, 1, " MENÜ")
-            lbl = " ÇIKTI" if self.running_cmd else " DURUM"
-            self.scr.addstr(3, cx, lbl)
-            self.scr.attroff(curses.color_pair(5)|curses.A_BOLD)
-        except curses.error:
-            pass
+            self.scr.attron(curses.color_pair(5) | curses.A_BOLD)
+            self.scr.addstr(3, 1, "MENU")
+            panel_lbl = "CIKTI" if self.busy else "SON LOG"
+            self.scr.addstr(3, cx, panel_lbl)
+            self.scr.attroff(curses.color_pair(5) | curses.A_BOLD)
+        except curses.error: pass
 
-        # vertical separator
-        for row in range(2, h-1):
+        # ── vertical line ──────────────────────────────────────────────
+        for row in range(2, h - 1):
             try:
                 self.scr.attron(curses.color_pair(6))
-                self.scr.addstr(row, menu_w, "│")
+                self.scr.addstr(row, mw, "│")
                 self.scr.attroff(curses.color_pair(6))
-            except curses.error:
-                pass
+            except curses.error: pass
 
-        # menu
-        sel_i = self.selectable[self.sel]
+        # ── MENU ───────────────────────────────────────────────────────
+        sel_idx = self.selectable[self.sel]
         row = 4
         for i, item in enumerate(MENU):
-            if row >= h-1: break
+            if row >= h - 1: break
             if item is None:
                 row += 1; continue
             key, label = item
-            is_sel = (i == sel_i)
-            text = f" {key} {label}"[:menu_w-1].ljust(menu_w-1)
+            is_sel = (i == sel_idx)
+            is_quit = (key == "q")
+            line = f" {key}  {label}"[:mw - 1].ljust(mw - 1)
             try:
                 if is_sel:
-                    self.scr.attron(curses.color_pair(7)|curses.A_BOLD)
-                    self.scr.addstr(row, 0, text)
-                    self.scr.attroff(curses.color_pair(7)|curses.A_BOLD)
+                    pair = curses.color_pair(3) if is_quit else curses.color_pair(2)
+                    self.scr.attron(pair | curses.A_BOLD)
+                    self.scr.addstr(row, 0, line)
+                    self.scr.attroff(pair | curses.A_BOLD)
                 else:
-                    self.scr.attron(curses.color_pair(1)|curses.A_BOLD)
+                    self.scr.attron(curses.color_pair(7) | curses.A_BOLD)
                     self.scr.addstr(row, 1, key)
-                    self.scr.attroff(curses.color_pair(1)|curses.A_BOLD)
+                    self.scr.attroff(curses.color_pair(7) | curses.A_BOLD)
                     self.scr.attron(curses.color_pair(5))
-                    self.scr.addstr(row, 2, f" {label}"[:menu_w-2])
+                    self.scr.addstr(row, 3, f"  {label}"[:mw - 3])
                     self.scr.attroff(curses.color_pair(5))
-            except curses.error:
-                pass
+            except curses.error: pass
             row += 1
 
-        # content
-        content_w = max(0, w - cx - 1)
+        # ── content / log panel ───────────────────────────────────────
         content_h = h - 5
-        with self.output_lock:
-            lines = list(self.output_lines)
-        if not lines and not self.running_cmd and st:
+        with self.lock:
+            lines = list(self.lines)
+
+        if not lines and not self.busy and st:
             lines = self._stat_lines(st)
+
         visible = lines[-content_h:] if len(lines) > content_h else lines
         for ri, line in enumerate(visible):
-            if 4+ri >= h-1: break
-            stripped = strip_ansi(line)[:content_w]
-            color = curses.color_pair(5)
+            if 4 + ri >= h - 1: break
+            stripped = strip_ansi(line)[:cw]
             sl = stripped.strip()
-            if sl.startswith("✔") or "tamamlandi" in sl.lower() or "tamam" in sl.lower():
-                color = curses.color_pair(2)
-            elif sl.startswith("✘") or "basarisiz" in sl.lower():
-                color = curses.color_pair(3)
-            elif sl.startswith("─") or sl.startswith("["):
-                color = curses.color_pair(6)
-            elif sl.startswith("…") or sl.startswith("Baslatiliyor"):
+            color = curses.color_pair(5)
+            if any(c in sl for c in ["✔", "tamam", "Tamam"]):
+                color = curses.color_pair(8)
+            elif any(c in sl for c in ["✘", "hata", "basarisiz"]):
+                color = curses.color_pair(9)
+            elif stripped.startswith("  …") or stripped.startswith("  ⠋"):
                 color = curses.color_pair(4)
+            elif stripped.startswith("  ─") or (stripped and stripped[0] == "["):
+                color = curses.color_pair(6)
             try:
                 self.scr.attron(color)
-                self.scr.addstr(4+ri, cx, stripped)
+                self.scr.addstr(4 + ri, cx, stripped)
                 self.scr.attroff(color)
-            except curses.error:
-                pass
+            except curses.error: pass
 
-        # footer
-        footer = " ↑↓ seç · ENTER/1-7 çalıştır · R yenile · Q çıkış"
+        # ── footer bar ────────────────────────────────────────────────
+        footer = " ↑↓ sec  ENTER/1-7 calistir  R yenile  Q cikis"
         try:
             self.scr.attron(curses.color_pair(1))
-            self.scr.addstr(h-1, 0, footer[:w-1].ljust(w-1))
+            self.scr.addstr(h - 1, 0, footer[:w - 1].ljust(w - 1))
             self.scr.attroff(curses.color_pair(1))
-        except curses.error:
-            pass
+        except curses.error: pass
 
         self.scr.refresh()
 
     def _stat_lines(self, st):
-        dp = st.get("disk_pct",0); rp = st.get("ram_pct",0); sp = st.get("swap_pct",0)
-        lines = ["",
-            f"  Disk    : {dp}%  ({st.get('disk_used','?')} kullanialdi, {st.get('disk_free','?')} bos)",
-            f"  RAM     : {rp}%  ({st.get('ram_used','?')} / {st.get('ram_total','?')})",
-            f"  Swap    : {sp}%  ({st.get('swap_used','?')} / {st.get('swap_total','?')})" if sp>0 else "  Swap    : bos",
+        dp = st.get("disk_pct", 0)
+        rp = st.get("ram_pct", 0)
+        sp = st.get("swap_pct", 0)
+        cron_ok = sh("crontab -l 2>/dev/null | grep -c 'optimize run'") not in ("", "0")
+        return [
+            "",
+            f"  Disk    : {bar(dp,16)} {dp}%",
+            f"            {st.get('disk_used','?')} kullanialdi / {st.get('disk_tot','?')} toplam",
+            "",
+            f"  RAM     : {bar(rp,16)} {rp}%",
+            f"            {st.get('ram_used','?')} / {st.get('ram_tot','?')}",
+            "",
+            f"  Swap    : " + (f"{bar(sp,16)} {sp}%" if sp > 0 else "bos"),
+            "",
             f"  Yuk     : {st.get('load','?')}",
             f"  Uptime  : {st.get('uptime','?')}",
             "",
+            f"  Cron    : {'aktif - her 2 saatte bir' if cron_ok else 'kurulu degil'}",
+            f"  Surum   : v{VERSION}",
         ]
-        cron_active = os.popen("crontab -l 2>/dev/null | grep -c 'optimize run'").read().strip() != "0"
-        lines.append(f"  Cron    : {'aktif - her 2 saatte bir' if cron_active else 'kurulu degil'}")
-        lines.append(f"  Versiyon: v{VERSION}")
-        return lines
 
-    def set_output(self, lines):
-        with self.output_lock:
-            self.output_lines = list(lines)
+    def _set_lines(self, lines):
+        with self.lock:
+            self.lines = list(lines)
 
-    def append_output(self, line):
-        with self.output_lock:
-            self.output_lines.append(line)
+    def _add_line(self, line):
+        with self.lock:
+            self.lines.append(line)
 
-    def run_action(self, action):
-        if self.running_cmd: return
-        self.running_cmd = True
-        self.set_output([])
-        def _run():
+    def _run_action(self, action):
+        if self.busy: return
+        self.busy = True
+        self._set_lines([])
+
+        def _do():
             try:
                 if action == "logf":
-                    self.live_log = True
-                    import subprocess as sp2
-                    proc = sp2.Popen(["tail","-n","40","-f",LOG_FILE],
-                                     stdout=sp2.PIPE, stderr=sp2.PIPE, text=True)
-                    while self.live_log:
+                    self.watching_log = True
+                    proc = subprocess.Popen(
+                        ["tail", "-n", "60", "-f", LOG_FILE],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                    )
+                    while self.watching_log:
                         line = proc.stdout.readline()
                         if not line: break
-                        self.append_output("  " + strip_ansi(line.rstrip()))
+                        self._add_line("  " + strip_ansi(line.rstrip()))
                     proc.terminate()
                 else:
-                    import subprocess as sp2
-                    proc = sp2.Popen(["/usr/local/bin/optimize", action],
-                                     stdout=sp2.PIPE, stderr=sp2.STDOUT, text=True)
+                    proc = subprocess.Popen(
+                        ["/usr/local/bin/optimize", action],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                    )
                     for line in proc.stdout:
-                        self.append_output(strip_ansi(line.rstrip()))
+                        self._add_line(strip_ansi(line.rstrip()))
                     proc.wait()
             finally:
-                self.running_cmd = False
-                self.live_log = False
-                self._load_stats()
-        threading.Thread(target=_run, daemon=True).start()
+                self.busy = False
+                self.watching_log = False
+                self._refresh_stats()
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def handle_key(self, k):
-        km = {ord('1'):"run", ord('2'):"durum", ord('3'):"log",
-              ord('4'):"logf", ord('5'):"cron", ord('6'):"crondurum", ord('7'):"upgrade"}
-        if self.live_log and k != curses.ERR:
-            self.live_log = False; return True
+        km = {
+            ord('1'): "run", ord('2'): "durum", ord('3'): "log",
+            ord('4'): "logf", ord('5'): "cron", ord('6'): "crondurum",
+            ord('7'): "upgrade",
+        }
+        if self.watching_log and k != curses.ERR:
+            self.watching_log = False; return True
         if k in (curses.KEY_UP, ord('k')):
-            self.sel = (self.sel-1) % len(self.selectable)
+            self.sel = (self.sel - 1) % len(self.selectable)
         elif k in (curses.KEY_DOWN, ord('j')):
-            self.sel = (self.sel+1) % len(self.selectable)
+            self.sel = (self.sel + 1) % len(self.selectable)
         elif k in (curses.KEY_ENTER, ord('\n'), ord('\r')):
             idx = self.selectable[self.sel]
             item = MENU[idx]
-            if item:
-                am = {"1":"run","2":"durum","3":"log","4":"logf","5":"cron","6":"crondurum","7":"upgrade","q":None}
-                action = am.get(item[0])
-                if action is None: return False
-                self.run_action(action)
+            if not item: return True
+            am = {"1":"run","2":"durum","3":"log","4":"logf","5":"cron","6":"crondurum","7":"upgrade","q":None}
+            action = am.get(item[0])
+            if action is None: return False
+            self._run_action(action)
         elif k in km:
-            self.run_action(km[k])
+            self._run_action(km[k])
         elif k in (ord('q'), ord('Q')):
             return False
         elif k in (ord('r'), ord('R')):
-            self._load_stats(); self.set_output([])
+            self._refresh_stats(); self._set_lines([])
         return True
 
     def run(self):
-        self.scr.nodelay(True); self.scr.keypad(True); curses.curs_set(0)
+        self.scr.nodelay(True)
+        self.scr.keypad(True)
+        curses.curs_set(0)
         tick = 0
         while True:
             self.draw()
@@ -329,10 +365,16 @@ class OptimizeTUI:
             time.sleep(0.05)
             tick += 1
             if tick % 400 == 0:
-                self._load_stats()
+                self._refresh_stats()
+
+def sh(cmd):
+    try:
+        return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, text=True).strip()
+    except:
+        return ""
 
 def main(scr):
-    OptimizeTUI(scr).run()
+    TUI(scr).run()
 
 if __name__ == "__main__":
     curses.wrapper(main)
@@ -358,59 +400,59 @@ stat_line(){
   local dc=$G; [ "$disk_pct" -ge 70 ] && dc=$Y; [ "$disk_pct" -ge 90 ] && dc=$R
   local rc=$G; [ "$ram_pct"  -ge 70 ] && rc=$Y; [ "$ram_pct"  -ge 90 ] && rc=$R
   echo ""
-  printf "  ${D}Disk    :${N} ${dc}%s%%${N}  ${D}(%s kullanıldı, %s boş)${N}\n" "$disk_pct" "$disk_used" "$disk_free"
+  printf "  ${D}Disk    :${N} ${dc}%s%%${N}  ${D}(%s / %s bos)${N}\n" "$disk_pct" "$disk_used" "$disk_free"
   printf "  ${D}RAM     :${N} ${rc}%s%%${N}  ${D}(%s / %s)${N}\n" "$ram_pct" "$ram_used" "$ram_total"
   if [ "$swap_total_kb" -gt 0 ] && [ "$swap_kb" -gt 0 ]; then
     printf "  ${D}Swap    :${N} %s / %s\n" "$swap_used" "$swap_total"
   else
-    printf "  ${D}Swap    :${N} ${D}boş${N}\n"
+    printf "  ${D}Swap    :${N} ${D}bos${N}\n"
   fi
   printf "  ${D}Load    :${N} %s  ${D}·  %s${N}\n" "$load" "$(date '+%d.%m.%Y %H:%M')"
   echo ""
 }
 
-step_ok(){   printf "  ${G}✔${N}  %s\n" "$1"; }
-step_err(){  printf "  ${R}✘${N}  %s\n" "$1"; }
-step_skip(){ printf "  ${D}─${N}  ${D}%s${N}\n" "$1"; }
+step_ok(){   printf "  ${G}v${N}  %s\n" "$1"; }
+step_err(){  printf "  ${R}x${N}  %s\n" "$1"; }
+step_skip(){ printf "  ${D}-${N}  ${D}%s${N}\n" "$1"; }
 
 step_run(){
   local msg="$1"; shift
-  printf "  ${D}…${N}  %s" "$msg"
+  printf "  ...  %s" "$msg"
   ("$@" >> "$LOG_FILE" 2>&1) &
-  local pid=$! sp=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏') i=0
+  local pid=$! sp=('/' '-' '\' '|') i=0
   while kill -0 "$pid" 2>/dev/null; do
-    printf "\r  ${C}%s${N}  %s" "${sp[$i]}" "$msg"
-    i=$(( (i+1) % 10 )); sleep 0.08
+    printf "\r  ${C}%s${N}   %s" "${sp[$i]}" "$msg"
+    i=$(( (i+1) % 4 )); sleep 0.1
   done
   wait "$pid"; local ec=$?
-  if [ $ec -eq 0 ]; then printf "\r"; step_ok "$msg"
+  if [ $ec -eq 0 ]; then printf "\r"; step_ok  "$msg"
   else                   printf "\r"; step_err "$msg"; fi
   return $ec
 }
 
 run_optimize(){
   echo ""
-  printf "  ${Y}Optimizasyon başlıyor...${N}\n\n"
+  printf "  ${Y}Optimizasyon basliyor...${N}\n\n"
   log "=== BASALDI ==="
   step_run "APT cache temizleniyor"     bash -c "apt-get clean -y && apt-get autoclean -y && apt-get autoremove -y"
   step_run "/tmp temizleniyor"          bash -c "find /tmp -type f -atime +1 -delete 2>/dev/null; true"
   step_run "/var/tmp temizleniyor"      bash -c "find /var/tmp -type f -atime +3 -delete 2>/dev/null; true"
-  step_run "Journal logları kırpılıyor" bash -c "journalctl --vacuum-size=100M && journalctl --vacuum-time=7d"
+  step_run "Journal loglari kirpiliyor" bash -c "journalctl --vacuum-size=100M && journalctl --vacuum-time=7d"
   step_run "Eski .gz loglar siliniyor"  bash -c "find /var/log -name '*.gz' -mtime +30 -delete 2>/dev/null; true"
   if command -v docker &>/dev/null; then
     step_run "Docker temizleniyor"      bash -c "docker system prune -f"
   else
-    step_skip "Docker yok — atlandı"
+    step_skip "Docker yok -- atlandi"
   fi
-  step_run "RAM cache boşaltılıyor"    bash -c "sync && echo 3 > /proc/sys/vm/drop_caches"
+  step_run "RAM cache bosaltiliyor"    bash -c "sync && echo 3 > /proc/sys/vm/drop_caches"
   if [ "$(free | awk '/Swap/{print $3}')" -gt 0 ]; then
     step_run "Swap temizleniyor"       bash -c "swapoff -a && swapon -a"
   else
-    step_skip "Swap zaten boş — atlandı"
+    step_skip "Swap zaten bos -- atlandi"
   fi
   log "=== TAMAMLANDI ==="
   echo ""
-  printf "  ${G}✔  Optimizasyon tamamlandı!${N}\n"
+  printf "  ${G}Optimizasyon tamamlandi!${N}\n"
   stat_line
 }
 
@@ -419,23 +461,23 @@ show_logs(){
   if [ -f "$LOG_FILE" ]; then
     tail -40 "$LOG_FILE" | while IFS= read -r l; do printf "  ${D}%s${N}\n" "$l"; done
   else
-    printf "  ${Y}Log yok. Önce: optimize run${N}\n"
+    printf "  ${Y}Log yok. Once: optimize run${N}\n"
   fi
   echo ""
 }
 
 do_upgrade(){
   echo ""
-  printf "  ${D}…${N}  GitHub'dan indiriliyor..."
+  printf "  ...  GitHub'dan indiriliyor..."
   TMP=$(mktemp)
   if curl -fsSL "$REPO_RAW" -o "$TMP" 2>/dev/null; then
     NEW_VER=$(grep '^VERSION=' "$TMP" | cut -d'"' -f2)
     cp "$TMP" "$INSTALL_PATH" && chmod +x "$INSTALL_PATH" && rm -f "$TMP"
-    printf "\r  ${G}✔${N}  Güncelleme tamamlandı!  ${D}%s → %s${N}\n\n" "$VERSION" "${NEW_VER:-yeni}"
+    printf "\r  ${G}v${N}  Guncelleme tamamlandi!  ${D}%s -> %s${N}\n\n" "$VERSION" "${NEW_VER:-yeni}"
     exec "$INSTALL_PATH" "$@"
   else
     rm -f "$TMP"
-    printf "\r  ${R}✘${N}  İndirme başarısız!\n\n"
+    printf "\r  ${R}x${N}  Indirme basarisiz!\n\n"
     exit 1
   fi
 }
@@ -443,10 +485,10 @@ do_upgrade(){
 run_cron(){
   echo ""
   if crontab -l 2>/dev/null | grep -q "optimize run"; then
-    printf "  ${Y}Cron zaten kurulu — her 2 saatte bir çalışıyor${N}\n"
+    printf "  ${Y}Cron zaten kurulu -- her 2 saatte bir${N}\n"
   else
     (crontab -l 2>/dev/null; echo "0 */2 * * * /usr/local/bin/optimize run >> /var/log/vds_optimize.log 2>&1") | crontab -
-    printf "  ${G}✔  Cron kuruldu — her 2 saatte bir çalışacak${N}\n"
+    printf "  ${G}v  Cron kuruldu -- her 2 saatte bir${N}\n"
   fi
   echo ""
 }
@@ -454,9 +496,9 @@ run_cron(){
 run_crondurum(){
   echo ""
   if crontab -l 2>/dev/null | grep -q "optimize run"; then
-    printf "  ${G}✔  Aktif — 2 saatte bir çalışıyor${N}\n"
+    printf "  ${G}v  Aktif -- 2 saatte bir${N}\n"
   else
-    printf "  ${R}✘  Kurulu değil — başlatmak için: optimize cron${N}\n"
+    printf "  ${R}x  Kurulu degil -- calistirmak icin: optimize cron${N}\n"
   fi
   echo ""
 }
@@ -466,16 +508,16 @@ dispatch(){
     run)        run_optimize ;;
     durum)      stat_line ;;
     log)        show_logs ;;
-    logf)       printf "\n  ${C}Canlı log (çıkmak: CTRL+C)${N}\n\n"; tail -f "$LOG_FILE" ;;
+    logf)       printf "\n  ${C}Canli log (cikmak: CTRL+C)${N}\n\n"; tail -f "$LOG_FILE" ;;
     upgrade)    do_upgrade ;;
     cron)       run_cron ;;
     crondurum)  run_crondurum ;;
-    yardim|yardım|help|-h|--help)
+    yardim|help|-h|--help)
       echo ""
       printf "  ${D}Komutlar :${N} run | durum | log | logf | cron | crondurum | upgrade\n"
-      printf "  ${D}TUI      :${N} optimize  (argümansız)\n\n" ;;
+      printf "  ${D}TUI      :${N} optimize  (argumansiz)\n\n" ;;
     --version)  echo "$VERSION" ;;
-    *) printf "\n  ${R}✘  Bilinmeyen komut: %s${N}\n  ${D}Yardım: optimize yardim${N}\n\n" "$1" ;;
+    *) printf "\n  ${R}x  Bilinmeyen komut: %s${N}\n  ${D}Yardim: optimize yardim${N}\n\n" "$1" ;;
   esac
 }
 
