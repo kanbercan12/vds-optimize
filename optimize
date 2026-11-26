@@ -8,101 +8,71 @@ DIM='\033[2m';NC='\033[0m'
 LOG_FILE="/var/log/vds_optimize.log"
 REPO_RAW="https://raw.githubusercontent.com/kanbercan12/vds-optimize/main/optimize"
 INSTALL_PATH="/usr/local/bin/optimize"
-VERSION="2.0.0"
+VERSION="2.1.0"
 
-WIDTH=54
+WIDTH=44
 
-line(){ printf "  ${CYAN}║${NC}"; }
-top(){  echo -e "  ${CYAN}╔$(printf '═%.0s' $(seq 1 $WIDTH))╗${NC}"; }
-mid(){  echo -e "  ${CYAN}╠$(printf '═%.0s' $(seq 1 $WIDTH))╣${NC}"; }
-bot(){  echo -e "  ${CYAN}╚$(printf '═%.0s' $(seq 1 $WIDTH))╝${NC}"; }
-thin_top(){ echo -e "  ${GRAY}┌$(printf '─%.0s' $(seq 1 $WIDTH))┐${NC}"; }
-thin_mid(){ echo -e "  ${GRAY}├$(printf '─%.0s' $(seq 1 $WIDTH))┤${NC}"; }
-thin_bot(){ echo -e "  ${GRAY}└$(printf '─%.0s' $(seq 1 $WIDTH))┘${NC}"; }
-pad(){ local t="$1" c="${2:-$WHITE}" w="${3:-$WIDTH}"; local l=${#t}; local s=$(( (w - l) )); printf "${c}%s${NC}%${s}s" "$t" ""; }
+thin_top(){ echo -e "  ${CYAN}╔$(printf '═%.0s' $(seq 1 $WIDTH))╗${NC}"; }
+thin_mid(){ echo -e "  ${CYAN}╠$(printf '═%.0s' $(seq 1 $WIDTH))╣${NC}"; }
+thin_bot(){ echo -e "  ${CYAN}╚$(printf '═%.0s' $(seq 1 $WIDTH))╝${NC}"; }
 
 banner(){
   clear
   echo ""
-  top
-  line; printf " %-${WIDTH}s" ""; echo -e "${CYAN}║${NC}"
-  line; printf "   ${LCYAN}${BOLD}  ██╗   ██╗██████╗ ███████╗${NC}%$((WIDTH-29))s${CYAN}║${NC}"$'\n'
-  line; printf "   ${LCYAN}${BOLD}  ██║   ██║██╔══██╗██╔════╝${NC}%$((WIDTH-29))s${CYAN}║${NC}"$'\n'
-  line; printf "   ${LCYAN}${BOLD}  ██║   ██║██║  ██║███████╗${NC}%$((WIDTH-29))s${CYAN}║${NC}"$'\n'
-  line; printf "   ${LCYAN}${BOLD}  ╚██╗ ██╔╝██║  ██║╚════██║${NC}%$((WIDTH-29))s${CYAN}║${NC}"$'\n'
-  line; printf "   ${LCYAN}${BOLD}   ╚████╔╝ ██████╔╝███████║${NC}%$((WIDTH-29))s${CYAN}║${NC}"$'\n'
-  line; printf "   ${LCYAN}${BOLD}    ╚═══╝  ╚═════╝ ╚══════╝${NC}%$((WIDTH-29))s${CYAN}║${NC}"$'\n'
-  line; printf " %-${WIDTH}s" ""; echo -e "${CYAN}║${NC}"
-  mid
-  line; printf "   ${GRAY}VDS Optimizasyon Araci ${DIM}v${VERSION}${NC}%$((WIDTH-26))s${CYAN}║${NC}"$'\n'
-  line; printf "   ${GRAY}by ${WHITE}kanbercan12${NC}%$((WIDTH-14))s${CYAN}║${NC}"$'\n'
-  bot
-  echo ""
-}
-
-section(){
-  echo ""
   thin_top
-  printf "  ${GRAY}│${NC} ${YELLOW}${BOLD}%-$((WIDTH-2))s${NC}${GRAY}│${NC}\n" "$1"
+  printf "  ${CYAN}║${NC} ${LCYAN}${BOLD}🚀  VDS OPTİMİZASYON ARACI${NC}%-$((WIDTH-27))s${CYAN}║${NC}\n" ""
+  printf "  ${CYAN}║${NC} ${GRAY}   v${VERSION} · by kanbercan12%-$((WIDTH-23))s${CYAN}║${NC}\n" ""
   thin_bot
   echo ""
 }
 
+section(){
+  echo -e "  ${YELLOW}${BOLD}── $1 ${GRAY}$(printf '─%.0s' $(seq 1 $((WIDTH - ${#1} - 4))))${NC}"
+  echo ""
+}
+
 progress_bar(){
-  local pct=$1 label="$2" w=30
+  local pct=$1 label="$2" w=20
   local filled=$(( pct * w / 100 ))
   local empty=$(( w - filled ))
   local color=$GREEN
   [ "$pct" -ge 70 ] && color=$YELLOW
   [ "$pct" -ge 90 ] && color=$RED
-  printf "  ${GRAY}│${NC}  %-14s ${GRAY}[${NC}${color}%s${GRAY}%s${NC}${GRAY}]${NC} ${WHITE}%3d%%${NC}\n" \
+  printf "  ${GRAY}│${NC}  %-10s ${GRAY}[${NC}${color}%s${GRAY}%s${NC}${GRAY}]${NC} ${WHITE}%3d%%${NC}\n" \
     "$label" "$(printf '█%.0s' $(seq 1 $filled))" "$(printf '░%.0s' $(seq 1 $empty))" "$pct"
 }
 
 stat_box(){
-  local disk_used disk_total disk_pct ram_used ram_total ram_pct swap_used
-  disk_used=$(df / | awk 'NR==2{print $3}')
-  disk_total=$(df / | awk 'NR==2{print $2}')
   disk_pct=$(df / | awk 'NR==2{print $5}' | tr -d '%')
   disk_used_h=$(df -h / | awk 'NR==2{print $3}')
   disk_free_h=$(df -h / | awk 'NR==2{print $4}')
   ram_total_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
   ram_avail_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-  ram_used_kb=$(( ram_total_kb - ram_avail_kb ))
-  ram_pct=$(( ram_used_kb * 100 / ram_total_kb ))
+  ram_pct=$(( (ram_total_kb - ram_avail_kb) * 100 / ram_total_kb ))
   ram_used_h=$(free -h | awk '/Mem/{print $3}')
   ram_total_h=$(free -h | awk '/Mem/{print $2}')
-  swap_used=$(free -h | awk '/Swap/{print $3}')
-  swap_total=$(free -h | awk '/Swap/{print $2}')
   swap_kb=$(free | awk '/Swap/{print $3}')
   swap_total_kb=$(free | awk '/Swap/{print $2}')
-  if [ "$swap_total_kb" -gt 0 ]; then
-    swap_pct=$(( swap_kb * 100 / swap_total_kb ))
-  else
-    swap_pct=0
-  fi
-  uptime_str=$(uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')
+  swap_pct=$(( swap_total_kb > 0 ? swap_kb * 100 / swap_total_kb : 0 ))
+  swap_used_h=$(free -h | awk '/Swap/{print $3}')
+  swap_total_h=$(free -h | awk '/Swap/{print $2}')
   load=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ',')
 
   echo ""
-  thin_top
-  printf "  ${GRAY}│${NC} ${CYAN}${BOLD}%-$((WIDTH-2))s${NC}${GRAY}│${NC}\n" "  SUNUCU DURUMU"
-  thin_mid
+  echo -e "  ${GRAY}┌$(printf '─%.0s' $(seq 1 $WIDTH))┐${NC}"
   printf "  ${GRAY}│${NC}%-${WIDTH}s${GRAY}│${NC}\n" ""
   progress_bar "$disk_pct" "💾 Disk"
-  printf "  ${GRAY}│${NC}  ${DIM}%-$((WIDTH-3))s${NC}${GRAY}│${NC}\n" "${disk_used_h} kullanıldı / ${disk_free_h} boş"
+  printf "  ${GRAY}│${NC}  ${DIM}%s / %s boş%-$((WIDTH-18))s${NC}${GRAY}│${NC}\n" "$disk_used_h" "$disk_free_h" ""
   printf "  ${GRAY}│${NC}%-${WIDTH}s${GRAY}│${NC}\n" ""
   progress_bar "$ram_pct" "🧠 RAM"
-  printf "  ${GRAY}│${NC}  ${DIM}%-$((WIDTH-3))s${NC}${GRAY}│${NC}\n" "${ram_used_h} / ${ram_total_h}"
+  printf "  ${GRAY}│${NC}  ${DIM}%s / %s%-$((WIDTH-10))s${NC}${GRAY}│${NC}\n" "$ram_used_h" "$ram_total_h" ""
   printf "  ${GRAY}│${NC}%-${WIDTH}s${GRAY}│${NC}\n" ""
   progress_bar "$swap_pct" "🔄 Swap"
-  printf "  ${GRAY}│${NC}  ${DIM}%-$((WIDTH-3))s${NC}${GRAY}│${NC}\n" "${swap_used} / ${swap_total}"
+  printf "  ${GRAY}│${NC}  ${DIM}%s / %s%-$((WIDTH-10))s${NC}${GRAY}│${NC}\n" "$swap_used_h" "$swap_total_h" ""
   printf "  ${GRAY}│${NC}%-${WIDTH}s${GRAY}│${NC}\n" ""
-  printf "  ${GRAY}│${NC}  ${GRAY}⏱  Uptime:${NC} ${WHITE}%-$((WIDTH-13))s${NC}${GRAY}│${NC}\n" "$uptime_str"
-  printf "  ${GRAY}│${NC}  ${GRAY}📊 Load:  ${NC} ${WHITE}%-$((WIDTH-13))s${NC}${GRAY}│${NC}\n" "$load"
-  printf "  ${GRAY}│${NC}  ${GRAY}🕒 Tarih: ${NC} ${WHITE}%-$((WIDTH-13))s${NC}${GRAY}│${NC}\n" "$(date '+%d.%m.%Y %H:%M')"
+  printf "  ${GRAY}│${NC}  ${GRAY}Load: ${WHITE}%-$((WIDTH-9))s${NC}${GRAY}│${NC}\n" "$load  •  $(date '+%d.%m.%Y %H:%M')"
   printf "  ${GRAY}│${NC}%-${WIDTH}s${GRAY}│${NC}\n" ""
-  thin_bot
+  echo -e "  ${GRAY}└$(printf '─%.0s' $(seq 1 $WIDTH))┘${NC}"
   echo ""
 }
 
@@ -195,16 +165,14 @@ do_upgrade(){
 
 show_help(){
   banner
-  section "📖 KULLANIM"
-  printf "  ${GRAY}│${NC}  ${WHITE}optimize ${CYAN}<komut>${NC}\n\n"
-  printf "  ${GRAY}│${NC}  ${YELLOW}%-14s${NC}  %s\n" "run"       "Optimizasyonu çalıştır"
-  printf "  ${GRAY}│${NC}  ${YELLOW}%-14s${NC}  %s\n" "durum"     "Disk / RAM / Swap durumu"
-  printf "  ${GRAY}│${NC}  ${YELLOW}%-14s${NC}  %s\n" "log"       "Son logları göster"
-  printf "  ${GRAY}│${NC}  ${YELLOW}%-14s${NC}  %s\n" "logf"      "Canlı log (Ctrl+C çıkış)"
-  printf "  ${GRAY}│${NC}  ${YELLOW}%-14s${NC}  %s\n" "cron"      "Otomatik çalışmayı kur"
-  printf "  ${GRAY}│${NC}  ${YELLOW}%-14s${NC}  %s\n" "crondurum" "Cron durumunu göster"
-  printf "  ${GRAY}│${NC}  ${YELLOW}%-14s${NC}  %s\n" "upgrade"   "GitHub'dan son sürümü yükle"
-  printf "  ${GRAY}│${NC}  ${YELLOW}%-14s${NC}  %s\n" "yardım"    "Bu ekranı göster"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "run"       "Optimizasyonu çalıştır"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "durum"     "Disk / RAM / Swap durumu"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "log"       "Son logları göster"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "logf"      "Canlı log (Ctrl+C çıkış)"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "cron"      "Otomatik çalışmayı kur"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "crondurum" "Cron durumu"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "upgrade"   "Son sürümü GitHub'dan yükle"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "yardım"    "Bu ekranı göster"
   echo ""
 }
 
