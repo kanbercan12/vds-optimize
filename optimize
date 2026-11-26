@@ -163,6 +163,25 @@ do_upgrade(){
   echo ""
 }
 
+run_cron(){
+  banner; section "⏰ CRON KURULUM"; echo ""
+  if crontab -l 2>/dev/null | grep -q "optimize run"; then
+    printf "  ${YELLOW}⚠  Cron zaten kurulu${NC}\n"
+  else
+    (crontab -l 2>/dev/null; echo "0 */2 * * * /usr/local/bin/optimize run >> /var/log/vds_optimize.log 2>&1") | crontab -
+    printf "  ${GREEN}✔  Cron kuruldu — her 2 saatte bir çalışacak${NC}\n"
+  fi
+  echo ""
+}
+
+run_crondurum(){
+  banner; section "⏰ CRON DURUMU"; echo ""
+  crontab -l 2>/dev/null | grep -q "optimize run" \
+    && printf "  ${GREEN}✔  Aktif — 2 saatte bir çalışıyor${NC}\n" \
+    || printf "  ${RED}✘  Kurulu değil — 'optimize cron' çalıştır${NC}\n"
+  echo ""
+}
+
 show_help(){
   banner
   printf "  ${YELLOW}%-12s${NC}  %s\n" "run"       "Optimizasyonu çalıştır"
@@ -172,34 +191,39 @@ show_help(){
   printf "  ${YELLOW}%-12s${NC}  %s\n" "cron"      "Otomatik çalışmayı kur"
   printf "  ${YELLOW}%-12s${NC}  %s\n" "crondurum" "Cron durumu"
   printf "  ${YELLOW}%-12s${NC}  %s\n" "upgrade"   "Son sürümü GitHub'dan yükle"
-  printf "  ${YELLOW}%-12s${NC}  %s\n" "yardım"    "Bu ekranı göster"
+  printf "  ${YELLOW}%-12s${NC}  %s\n" "cikis"     "İnteraktif moddan çık"
   echo ""
 }
 
-case "${1:-yardım}" in
-  run)        run_optimize ;;
-  durum)      banner; stat_box ;;
-  log)        show_logs ;;
-  logf)       banner; section "📡 CANLI LOG"; echo ""; tail -f "$LOG_FILE" ;;
-  upgrade)    do_upgrade ;;
-  --version)  echo "$VERSION" ;;
-  cron)
-    banner; section "⏰ CRON KURULUM"; echo ""
-    if crontab -l 2>/dev/null | grep -q "optimize run"; then
-      printf "  ${YELLOW}⚠  Cron zaten kurulu${NC}\n"
-    else
-      (crontab -l 2>/dev/null; echo "0 */2 * * * /usr/local/bin/optimize run >> /var/log/vds_optimize.log 2>&1") | crontab -
-      printf "  ${GREEN}✔  Cron kuruldu — her 2 saatte bir çalışacak${NC}\n"
-    fi
-    echo ""
-    ;;
-  crondurum)
-    banner; section "⏰ CRON DURUMU"; echo ""
-    crontab -l 2>/dev/null | grep -q "optimize run" \
-      && printf "  ${GREEN}✔  Aktif — 2 saatte bir çalışıyor${NC}\n" \
-      || printf "  ${RED}✘  Kurulu değil — 'optimize cron' çalıştır${NC}\n"
-    echo ""
-    ;;
-  yardım|help|-h|--help|"") show_help ;;
-  *) printf "\n  ${RED}✘  Bilinmeyen komut: %s${NC}\n  ${GRAY}Yardım için: ${WHITE}optimize yardım${NC}\n\n" "$1"; exit 1 ;;
-esac
+dispatch(){
+  case "$1" in
+    run)        run_optimize ;;
+    durum)      banner; stat_box ;;
+    log)        show_logs ;;
+    logf)       banner; section "📡 CANLI LOG"; echo ""; tail -f "$LOG_FILE" ;;
+    upgrade)    do_upgrade ;;
+    cron)       run_cron ;;
+    crondurum)  run_crondurum ;;
+    yardım|help|-h|--help|"") show_help ;;
+    --version)  echo "$VERSION" ;;
+    cikis|exit|quit|q) echo -e "  ${GRAY}Görüşürüz!${NC}\n"; return 1 ;;
+    *) printf "\n  ${RED}✘  Bilinmeyen komut: %s${NC}\n  ${GRAY}Yardım için: ${WHITE}yardım${NC}\n\n" "$1" ;;
+  esac
+  return 0
+}
+
+interactive_mode(){
+  show_help
+  while true; do
+    printf "${CYAN}optimize${NC} ${GRAY}›${NC} "
+    read -r cmd args
+    [ -z "$cmd" ] && continue
+    dispatch "$cmd" $args || break
+  done
+}
+
+if [ $# -eq 0 ]; then
+  interactive_mode
+else
+  dispatch "$1" "${@:2}"
+fi
