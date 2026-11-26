@@ -7,7 +7,7 @@ LOG_FILE="/var/log/vds_optimize.log"
 REPO_RAW="https://raw.githubusercontent.com/kanbercan12/vds-optimize/main/optimize"
 INSTALL_PATH="/usr/local/bin/optimize"
 TUI_PATH="/usr/local/lib/optimize_tui.py"
-VERSION="3.2.0"
+VERSION="3.2.1"
 
 log(){ echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
 
@@ -17,7 +17,7 @@ cat > "$TUI_PATH" << 'PYEOF'
 import curses, subprocess, threading, time, os, re
 from datetime import datetime
 
-VERSION = "3.2.0"
+VERSION = "3.2.1"
 LOG_FILE = "/var/log/vds_optimize.log"
 
 MENU = [
@@ -95,16 +95,17 @@ class TUI:
     def _init_colors(self):
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1,  curses.COLOR_BLACK,  curses.COLOR_CYAN)    # header bar
-        curses.init_pair(2,  curses.COLOR_BLACK,  curses.COLOR_GREEN)   # ok / selected
-        curses.init_pair(3,  curses.COLOR_BLACK,  curses.COLOR_RED)     # err / sel-q
-        curses.init_pair(4,  curses.COLOR_YELLOW, -1)                   # warn text
-        curses.init_pair(5,  curses.COLOR_WHITE,  -1)                   # normal
-        curses.init_pair(6,  8,                   -1)                   # dim
-        curses.init_pair(7,  curses.COLOR_CYAN,   -1)                   # cyan text
-        curses.init_pair(8,  curses.COLOR_GREEN,  -1)                   # green text
-        curses.init_pair(9,  curses.COLOR_RED,    -1)                   # red text
-        curses.init_pair(10, curses.COLOR_BLACK,  curses.COLOR_YELLOW)  # warn selected
+        gray = 8 if curses.COLORS >= 256 else curses.COLOR_WHITE
+        curses.init_pair(1,  curses.COLOR_BLACK,  curses.COLOR_CYAN)
+        curses.init_pair(2,  curses.COLOR_BLACK,  curses.COLOR_GREEN)
+        curses.init_pair(3,  curses.COLOR_BLACK,  curses.COLOR_RED)
+        curses.init_pair(4,  curses.COLOR_YELLOW, -1)
+        curses.init_pair(5,  curses.COLOR_WHITE,  -1)
+        curses.init_pair(6,  gray,                -1)
+        curses.init_pair(7,  curses.COLOR_CYAN,   -1)
+        curses.init_pair(8,  curses.COLOR_GREEN,  -1)
+        curses.init_pair(9,  curses.COLOR_RED,    -1)
+        curses.init_pair(10, curses.COLOR_BLACK,  curses.COLOR_YELLOW)
 
     def _refresh_stats(self):
         def _do():
